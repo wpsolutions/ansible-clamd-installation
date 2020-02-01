@@ -1,0 +1,106 @@
+--- 
+# Will install and configure the relevant clam packages
+# Will startup the clamd and freshclam services/dameons
+- hosts: host1
+  become: yes
+  tasks:
+    - name: Install epel-release
+      yum:
+        name: epel-release
+        state: latest
+    - name: Install clam and other packages
+      yum:
+        name:
+          - clamav
+          - clamav-data
+          - clamav-scanner
+          - clamav-scanner-systemd
+          - clamav-server
+          - clamav-server-systemd
+          - clamav-unofficial-sigs
+          - clamav-update
+          - libsemanage-python
+    - name: Make a copy of freshclam.conf
+      copy:
+        src: /etc/freshclam.conf
+        path:  /etc/freshclam.conf.bak
+        remote_src: yes
+    - name: Delete example line
+      lineinfile:
+        path: /etc/freshclam.conf
+        regexp: "^Example"
+        state: absent
+ 
+    - name: Set freshclam configuration file
+      lineinfile:
+        path: /etc/freshclam.conf
+        regexp: "{{ item.regexp }}"
+        insertafter: "{{ item.insertafter }}"
+        line: "{{ item.line }}"
+      with_items:
+        - { regexp: '^NotifyClamd ', insertafter: '^#NotifyClamd ', line: 'NotifyClamd /etc/clamd.d/scan.conf' }
+        - { regexp: '^DatabaseOwner ', insertafter: '^#DatabaseOwner ', line: 'DatabaseOwner clamupdate' }
+        - { regexp: '^DatabaseDirectory ', insertafter: '^#DatabaseDirectory ', line: 'DatabaseDirectory /var/lib/clamav' }
+
+    - name: Create freshclam service file
+      blockinfile:
+        path: /usr/lib/systemd/system/clam-freshclam.service
+        create: yes
+        insertafter: EOF
+        block: "\n# Run the freshclam as daemon
+\n[Unit]
+\nDescription = freshclam scanner
+\nAfter = network.target
+
+\n[Service]
+\nType = forking
+\nExecStart = /usr/bin/freshclam -d -c 4
+\nRestart = on-failure
+\nPrivateTmp = true
+
+\n[Install]
+\nWantedBy=multi-user.target"
+
+    - name: Delete example line in scan.conf
+      lineinfile:
+        path: /etc/clamd.d/scan.conf
+        regexp: "^Example"
+        state: absent
+    - name: Set scan.conf configuration file
+      lineinfile:
+        path: /etc/clamd.d/scan.conf
+        regexp: "{{ item.regexp }}"
+        insertafter: "{{ item.insertafter }}"
+        line: "{{ item.line }}"
+      with_items:
+        - { regexp: '^User ', insertafter: '^#User ', line: 'User root' }
+        - { regexp: '^LocalSocket ', insertafter: '^#LocalSocket ', line: 'LocalSocket /var/run/clamd.scan/clamd.sock' }
+        - { regexp: '^TCPSocket ', insertafter: '^#TCPSocket ', line: 'TCPSocket 3310' }
+        - { regexp: '^TCPAddr ', insertafter: '^#TCPAddr ', line: 'TCPAddr 127.0.0.1' }
+
+    - name: Enable and start freshclam service
+      systemd:
+        name: clam-freshclam.service
+        state: started
+        enabled: yes
+    - name: Set antivirus_can_scan_system flag and keep persistent after reboot
+      seboolean:
+        name: antivirus_can_scan_system
+        state: yes
+        persistent: yes
+    - name: Set antivirus_use_jit flag and keep persistent after reboot
+      seboolean:
+        name: antivirus_use_jit
+        state: yes
+        persistent: yes
+    - name: Enable and start clamd daemon service
+      systemd:
+        name: clamd@scan.service
+        state: started
+        enabled: yes
+
+
+
+
+
+
